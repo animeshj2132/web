@@ -1,22 +1,151 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Phone</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Phone - WebRTC Call</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 20px; }
-    video { width: 300px; height: 225px; border: 2px solid #333; margin: 10px; }
-    #local { transform: scaleX(-1); } /* Mirror local video */
-    button { padding: 10px 20px; font-size: 16px; margin: 10px; }
-    #status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+    * { 
+      margin: 0; 
+      padding: 0; 
+      box-sizing: border-box;
+      -webkit-tap-highlight-color: transparent;
+    }
+    
+    body { 
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 10px;
+      overflow-x: hidden;
+    }
+    
+    h2 { 
+      color: white; 
+      text-align: center; 
+      margin: 10px 0 20px 0;
+      font-size: 24px;
+      text-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    #status { 
+      padding: 12px 15px;
+      margin: 0 0 15px 0;
+      background: rgba(255,255,255,0.95);
+      border-radius: 12px;
+      font-size: 14px;
+      text-align: center;
+      font-weight: 500;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
+    
+    .video-container {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      margin-bottom: 15px;
+    }
+    
+    video { 
+      width: 100%;
+      max-width: 100%;
+      height: auto;
+      aspect-ratio: 4/3;
+      border-radius: 12px;
+      border: 3px solid rgba(255,255,255,0.3);
+      background: #000;
+      object-fit: cover;
+      box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+    }
+    
+    #local { 
+      transform: scaleX(-1);
+      -webkit-transform: scaleX(-1);
+    }
+    
+    button { 
+      width: 100%;
+      padding: 16px 20px;
+      font-size: 18px;
+      font-weight: 600;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+      -webkit-appearance: none;
+      touch-action: manipulation;
+    }
+    
+    #callBtn {
+      background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%);
+      color: white;
+    }
+    
+    #callBtn:active {
+      transform: scale(0.98);
+      box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    }
+    
+    #callBtn:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+      opacity: 0.6;
+    }
+    
+    /* iOS Safari specific fixes */
+    @supports (-webkit-touch-callout: none) {
+      video {
+        -webkit-mask-image: -webkit-radial-gradient(white, black);
+      }
+    }
+    
+    /* Landscape mode adjustments */
+    @media (orientation: landscape) and (max-height: 500px) {
+      .video-container {
+        flex-direction: row;
+      }
+      video {
+        width: 48%;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 5px 0;
+      }
+    }
+    
+    /* Larger screens */
+    @media (min-width: 768px) {
+      body {
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+      }
+      .video-container {
+        max-width: 600px;
+        width: 100%;
+      }
+      button {
+        max-width: 400px;
+      }
+      h2 {
+        font-size: 32px;
+      }
+    }
   </style>
 </head>
 <body>
-  <h2>Phone</h2>
+  <h2>📱 Phone</h2>
   <div id="status">Status: Connecting...</div>
-  <video id="local" autoplay muted playsinline></video>
-  <video id="remote" autoplay playsinline controls></video>
-  <br>
-  <button id="callBtn" onclick="call()" disabled>Call Doctor</button>
+  <div class="video-container">
+    <video id="local" autoplay muted playsinline webkit-playsinline></video>
+    <video id="remote" autoplay playsinline webkit-playsinline controls></video>
+  </div>
+  <button id="callBtn" onclick="call()" disabled>📞 Call Doctor</button>
 
   <script>
     let socket = null;
