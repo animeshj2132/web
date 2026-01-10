@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<head><title>Simple WebRTC Test</title></head>
+<body>
+<h2>Simple Test</h2>
+<video id="local" autoplay muted playsinline style="width:300px; transform: scaleX(-1);"></video>
+<video id="remote" autoplay playsinline controls style="width:300px;"></video>
+<br>
+<button onclick="startCall()">Start Call</button>
+
+<script>
+let pc1, pc2;
+let localStream;
+
+async function startCall() {
+  console.log("Starting simple peer-to-peer call...");
+  
+  // Get local media
+  localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+  document.getElementById('local').srcObject = localStream;
+  
+  // Create peer connections WITHOUT any ICE servers
+  const config = { iceServers: [] };
+  pc1 = new RTCPeerConnection(config);
+  pc2 = new RTCPeerConnection(config);
+  
+  // Add tracks
+  localStream.getTracks().forEach(track => pc1.addTrack(track, localStream));
+  
+  // Handle remote stream
+  pc2.ontrack = (e) => {
+    console.log("✓ Remote track received");
+    document.getElementById('remote').srcObject = e.streams[0];
+  };
+  
+  // ICE candidate exchange
+  pc1.onicecandidate = (e) => {
+    if (e.candidate) {
+      console.log("PC1 candidate:", e.candidate.candidate.substring(0, 50));
+      pc2.addIceCandidate(e.candidate);
+    }
+  };
+  
+  pc2.onicecandidate = (e) => {
+    if (e.candidate) {
+      console.log("PC2 candidate:", e.candidate.candidate.substring(0, 50));
+      pc1.addIceCandidate(e.candidate);
+    }
+  };
+  
+  // Connection state monitoring
+  pc1.onconnectionstatechange = () => console.log("PC1 state:", pc1.connectionState);
+  pc2.onconnectionstatechange = () => console.log("PC2 state:", pc2.connectionState);
+  
+  // Create offer/answer
+  const offer = await pc1.createOffer();
+  await pc1.setLocalDescription(offer);
+  await pc2.setRemoteDescription(offer);
+  
+  const answer = await pc2.createAnswer();
+  await pc2.setLocalDescription(answer);
+  await pc1.setRemoteDescription(answer);
+  
+  console.log("✓ Offer/Answer exchange complete");
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Phone</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    video { width: 300px; height: 225px; border: 2px solid #333; margin: 10px; }
+    #local { transform: scaleX(-1); } /* Mirror local video */
+    button { padding: 10px 20px; font-size: 16px; margin: 10px; }
+    #status { padding: 10px; margin: 10px 0; background: #f0f0f0; border-radius: 5px; }
+  </style>
+</head>
+<body>
+  <h2>Phone</h2>
+  <div id="status">Status: Connecting...</div>
+  <video id="local" autoplay muted playsinline></video>
+  <video id="remote" autoplay playsinline controls></video>
+  <br>
+  <button id="callBtn" onclick="call()" disabled>Call Doctor</button>
+
+  <script>
+    let socket = null;
+    let pc = null;
+    let localStream = null;
+    let remoteStream = null;
+    let tracksReceived = 0;
+    const statusDiv = document.getElementById('status');
+    const callBtn = document.getElementById('callBtn');
+
+    // Initialize WebSocket connection
+    function connectWebSocket() {
+      statusDiv.textContent = 'Status: Connecting to server...';
+      
+      socket = new WebSocket("ws://localhost:3000");
+      
+      socket.onopen = () => {
+        console.log("✓ WebSocket connected");
+        statusDiv.textContent = 'Status: Connected to server';
+        socket.send(JSON.stringify({ type: "LOGIN", userId: "phone" }));
+        
+        // Enable call button once everything is ready
+        if (localStream) {
+          callBtn.disabled = false;
+          statusDiv.textContent = 'Status: Ready to call';
+        }
+      };
+      
+      socket.onerror = (error) => {
+        console.error("✗ WebSocket error:", error);
+        statusDiv.textContent = 'Status: Connection error';
+      };
+      
+      socket.onclose = () => {
+        console.log("✗ WebSocket closed");
+        statusDiv.textContent = 'Status: Disconnected - Reconnecting...';
+        callBtn.disabled = true;
+        
+        // Try to reconnect after 2 seconds
+        setTimeout(connectWebSocket, 2000);
+      };
+      
+      socket.onmessage = async (msg) => {
+        try {
+          const data = JSON.parse(msg.data);
+          console.log("← Received:", data.type);
+          
+          if (data.type === "ANSWER") {
+            console.log("← Received answer, setting remote description");
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            console.log("✓ Remote description set - call should connect");
+            statusDiv.textContent = 'Status: Call connected!';
+            callBtn.textContent = 'Connected ✓';
+          }
+          
+          if (data.type === "ICE") {
+            console.log("  Adding ICE candidate");
+            if (pc && data.candidate) {
+              await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
+          }
+        } catch (error) {
+          console.error("Error processing message:", error);
+        }
+      };
+    }
+
+    // Initialize peer connection
+    function initPeerConnection() {
+      const config = {
+        iceServers: [],  // No STUN/TURN - use only host candidates for localhost
+        iceTransportPolicy: 'all',
+        iceCandidatePoolSize: 10,
+        bundlePolicy: 'max-bundle',
+        rtcpMuxPolicy: 'require'
+      };
+      
+      console.log("Creating peer connection with config:", config);
+      pc = new RTCPeerConnection(config);
+      
+      pc.ontrack = (e) => {
+        console.log("✓ Received track:", e.track.kind, "from stream:", e.streams[0].id);
+        console.log("Track state:", e.track.readyState, "enabled:", e.track.enabled);
+        
+        tracksReceived++;
+        remoteStream = e.streams[0];
+        
+        // Wait for both audio and video tracks before setting stream
+        if (tracksReceived >= 2) {
+          const remoteVideo = document.getElementById('remote');
+          remoteVideo.srcObject = remoteStream;
+          
+          console.log("✓ Remote video stream set with both tracks");
+          console.log("Stream tracks:", remoteStream.getTracks().map(t => `${t.kind} (${t.readyState})`));
+          console.log("Video readyState:", remoteVideo.readyState);
+          console.log("📡 Current ICE state:", pc.iceConnectionState);
+          console.log("📡 Current connection state:", pc.connectionState);
+          
+          // Try to play immediately
+          const tryPlay = () => {
+            console.log("Attempting to play video...");
+            remoteVideo.play().then(() => {
+              console.log("✓✓✓ Remote video is now playing!");
+            }).catch(err => {
+              console.error("Remote video play error:", err);
+            });
+          };
+          
+          // If metadata already loaded, play immediately
+          if (remoteVideo.readyState >= 1) {
+            console.log("Metadata already loaded (readyState:", remoteVideo.readyState + ")");
+            tryPlay();
+          } else {
+            // Wait for metadata to load
+            console.log("Waiting for metadata to load...");
+            remoteVideo.onloadedmetadata = () => {
+              console.log("✓ Video metadata loaded event fired");
+              tryPlay();
+            };
+          }
+        } else {
+          console.log(`Waiting for more tracks... (${tracksReceived}/2)`);
+        }
+      };
+      
+      pc.onicecandidate = (e) => {
+        if (e.candidate) {
+          console.log("→ ICE candidate generated:", e.candidate.type, e.candidate.protocol);
+          if (socket && socket.readyState === WebSocket.OPEN) {
+            console.log("  Sending to doctor...");
+            socket.send(JSON.stringify({
+              type: "ICE",
+              to: "doctor",
+              candidate: e.candidate
+            }));
+          } else {
+            console.error("  ✗ Cannot send - socket not ready!");
+          }
+        } else {
+          console.log("✓ ICE gathering complete (null candidate)");
+        }
+      };
+      
+      pc.oniceconnectionstatechange = () => {
+        console.log("📡 ICE state:", pc.iceConnectionState);
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          console.log("✓ Peer connection established!");
+        }
+      };
+      
+      pc.onconnectionstatechange = () => {
+        console.log("📡 Connection state:", pc.connectionState);
+        statusDiv.textContent = `Status: ${pc.connectionState}`;
+      };
+      
+      pc.onicegatheringstatechange = () => {
+        console.log("🧊 ICE gathering state:", pc.iceGatheringState);
+      };
+    }
+
+    // Get user media
+    async function getUserMedia() {
+      try {
+        statusDiv.textContent = 'Status: Requesting camera access...';
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+          video: true, 
+          audio: true 
+        });
+        
+        console.log("✓ Got local media stream");
+        const localVideo = document.getElementById('local');
+        localVideo.srcObject = localStream;
+        
+        // Add tracks to peer connection
+        localStream.getTracks().forEach(track => {
+          console.log("Adding track to peer connection:", track.kind, track.id);
+          pc.addTrack(track, localStream);
+        });
+        console.log("Total tracks added:", localStream.getTracks().length);
+        
+        if (socket && socket.readyState === WebSocket.OPEN) {
+          callBtn.disabled = false;
+          statusDiv.textContent = 'Status: Ready to call';
+        } else {
+          statusDiv.textContent = 'Status: Waiting for server...';
+        }
+      } catch (error) {
+        console.error("✗ Error getting user media:", error);
+        statusDiv.textContent = 'Status: Camera access denied';
+        alert("Error accessing camera/microphone: " + error.message);
+      }
+    }
+
+    // Make a call
+    async function call() {
+      if (!localStream) {
+        alert("Camera/microphone not ready yet. Please wait.");
+        return;
+      }
+      
+      if (!socket || socket.readyState !== WebSocket.OPEN) {
+        alert("Not connected to server. Please wait for reconnection.");
+        return;
+      }
+      
+      try {
+        callBtn.disabled = true;
+        callBtn.textContent = 'Calling...';
+        statusDiv.textContent = 'Status: Creating call...';
+        tracksReceived = 0; // Reset for new call
+        remoteStream = null;
+        
+        console.log("→ Creating offer...");
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true,
+          iceRestart: false
+        });
+        await pc.setLocalDescription(offer);
+        console.log("✓ Local description set, sending offer");
+        
+        socket.send(JSON.stringify({
+          type: "OFFER",
+          to: "doctor",
+          offer: offer
+        }));
+        
+        statusDiv.textContent = 'Status: Waiting for doctor to accept...';
+      } catch (error) {
+        console.error("✗ Error creating offer:", error);
+        statusDiv.textContent = 'Status: Call failed';
+        callBtn.disabled = false;
+        callBtn.textContent = 'Call Doctor';
+        alert("Error starting call: " + error.message);
+      }
+    }
+
+    // Initialize everything
+    window.onload = () => {
+      initPeerConnection();
+      connectWebSocket();
+      getUserMedia();
+      
+      // Add event listeners to remote video for debugging
+      const remoteVideo = document.getElementById('remote');
+      remoteVideo.addEventListener('loadedmetadata', () => {
+        console.log('✓ Remote video metadata loaded');
+      });
+      remoteVideo.addEventListener('loadeddata', () => {
+        console.log('✓ Remote video data loaded');
+      });
+      remoteVideo.addEventListener('playing', () => {
+        console.log('✓ Remote video is playing');
+      });
+    };
+  </script>
+</body>
+</html>
