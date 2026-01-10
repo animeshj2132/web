@@ -46,6 +46,57 @@
       flex-direction: column;
       gap: 10px;
       margin-bottom: 15px;
+      position: relative;
+    }
+    
+    .video-wrapper {
+      position: relative;
+      width: 100%;
+    }
+    
+    .controls-overlay {
+      position: absolute;
+      bottom: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      gap: 10px;
+      z-index: 10;
+    }
+    
+    .control-btn {
+      width: 48px;
+      height: 48px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(0,0,0,0.7);
+      color: white;
+      font-size: 20px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+    }
+    
+    .control-btn:active {
+      transform: scale(0.9);
+    }
+    
+    .control-btn.active {
+      background: #ef4444;
+    }
+    
+    .call-controls {
+      display: flex;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+    
+    .call-controls button {
+      flex: 1;
     }
     
     video { 
@@ -143,10 +194,25 @@
   <h2>👨‍⚕️ Doctor</h2>
   <div id="status">Status: Connecting...</div>
   <div class="video-container">
-    <video id="local" autoplay muted playsinline webkit-playsinline></video>
+    <div class="video-wrapper">
+      <video id="local" autoplay muted playsinline webkit-playsinline></video>
+      <div class="controls-overlay">
+        <button class="control-btn" id="micBtn" onclick="toggleMic()" title="Toggle Microphone">
+          🎤
+        </button>
+        <button class="control-btn" id="camBtn" onclick="toggleCamera()" title="Toggle Camera">
+          📹
+        </button>
+      </div>
+    </div>
     <video id="remote" autoplay playsinline webkit-playsinline controls></video>
   </div>
-  <button id="acceptBtn" onclick="acceptCall()" disabled>✅ Accept Call</button>
+  <div class="call-controls">
+    <button id="acceptBtn" onclick="acceptCall()" disabled>✅ Accept Call</button>
+    <button id="endBtn" onclick="endCall()" style="display:none; background: linear-gradient(135deg, #f56565 0%, #ef4444 100%);">
+      ❌ End Call
+    </button>
+  </div>
 
   <script>
     let socket = null;
@@ -156,8 +222,124 @@
     let pendingIceCandidates = [];
     let remoteStream = null;
     let tracksReceived = 0;
+    let isAudioEnabled = true;
+    let isVideoEnabled = true;
+    let inCall = false;
+    let callState = {
+      userId: 'doctor',
+      targetId: 'phone',
+      active: false
+    };
+    
     const statusDiv = document.getElementById('status');
     const acceptBtn = document.getElementById('acceptBtn');
+    const endBtn = document.getElementById('endBtn');
+    const micBtn = document.getElementById('micBtn');
+    const camBtn = document.getElementById('camBtn');
+
+    // Check for existing call on load
+    window.onload = () => {
+      const savedCall = localStorage.getItem('webrtc_call_state');
+      if (savedCall) {
+        const state = JSON.parse(savedCall);
+        if (state.active && state.userId === 'doctor') {
+          console.log('📞 Rejoining previous call...');
+          setTimeout(() => {
+            initPeerConnection();
+            connectWebSocket();
+            getUserMedia();
+          }, 1000);
+        } else {
+          initPeerConnection();
+          connectWebSocket();
+          getUserMedia();
+        }
+      } else {
+        initPeerConnection();
+        connectWebSocket();
+        getUserMedia();
+      }
+      
+      // Add event listeners to remote video for debugging
+      const remoteVideo = document.getElementById('remote');
+      remoteVideo.addEventListener('loadedmetadata', () => {
+        console.log('✓ Remote video metadata loaded');
+      });
+      remoteVideo.addEventListener('loadeddata', () => {
+        console.log('✓ Remote video data loaded');
+      });
+      remoteVideo.addEventListener('playing', () => {
+        console.log('✓ Remote video is playing');
+      });
+    };
+
+    // Toggle microphone
+    function toggleMic() {
+      if (localStream) {
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+          isAudioEnabled = !isAudioEnabled;
+          audioTrack.enabled = isAudioEnabled;
+          micBtn.classList.toggle('active', !isAudioEnabled);
+          micBtn.textContent = isAudioEnabled ? '🎤' : '🔇';
+          console.log('🎤 Microphone:', isAudioEnabled ? 'ON' : 'OFF');
+        }
+      }
+    }
+
+    // Toggle camera
+    function toggleCamera() {
+      if (localStream) {
+        const videoTrack = localStream.getVideoTracks()[0];
+        if (videoTrack) {
+          isVideoEnabled = !isVideoEnabled;
+          videoTrack.enabled = isVideoEnabled;
+          camBtn.classList.toggle('active', !isVideoEnabled);
+          camBtn.textContent = isVideoEnabled ? '📹' : '📵';
+          console.log('📹 Camera:', isVideoEnabled ? 'ON' : 'OFF');
+        }
+      }
+    }
+
+    // End call
+    function endCall() {
+      console.log('❌ Ending call...');
+      
+      // Close peer connection
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      
+      // Clear call state
+      inCall = false;
+      callState.active = false;
+      pendingOffer = null;
+      pendingIceCandidates = [];
+      localStorage.setItem('webrtc_call_state', JSON.stringify(callState));
+      
+      // Reset UI
+      acceptBtn.style.display = 'inline-block';
+      acceptBtn.disabled = true;
+      acceptBtn.textContent = '✅ Accept Call';
+      endBtn.style.display = 'none';
+      statusDiv.textContent = 'Status: Call ended - Waiting for calls...';
+      
+      // Clear remote video
+      const remoteVideo = document.getElementById('remote');
+      remoteVideo.srcObject = null;
+      
+      // Reinitialize peer connection
+      tracksReceived = 0;
+      remoteStream = null;
+      initPeerConnection();
+    }
+
+    // Save call state
+    function saveCallState() {
+      callState.active = inCall;
+      localStorage.setItem('webrtc_call_state', JSON.stringify(callState));
+    }
 
     // Initialize WebSocket connection
     function connectWebSocket() {
@@ -370,6 +552,8 @@
         statusDiv.textContent = 'Status: Accepting call...';
         tracksReceived = 0; // Reset for new call
         remoteStream = null;
+        inCall = true;
+        saveCallState();
         
         console.log("→ Setting remote description from pending offer");
         await pc.setRemoteDescription(new RTCSessionDescription(pendingOffer));
@@ -396,6 +580,10 @@
         }));
         
         pendingOffer = null;
+        
+        // Show end call button, hide accept button
+        acceptBtn.style.display = 'none';
+        endBtn.style.display = 'inline-block';
         acceptBtn.textContent = 'Call Accepted ✓';
         statusDiv.textContent = 'Status: Call connected!';
         
@@ -406,6 +594,8 @@
         acceptBtn.disabled = false;
         acceptBtn.textContent = 'Accept Call';
         alert("Error accepting call: " + error.message);
+        inCall = false;
+        saveCallState();
       }
     }
 
