@@ -87,11 +87,10 @@
     // Initialize peer connection
     function initPeerConnection() {
       const config = {
-        iceServers: [],  // No STUN/TURN - use only host candidates for localhost
-        iceTransportPolicy: 'all',
-        iceCandidatePoolSize: 10,
-        bundlePolicy: 'max-bundle',
-        rtcpMuxPolicy: 'require'
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
       };
       
       console.log("Creating peer connection with config:", config);
