@@ -173,6 +173,38 @@ wss.on("connection", (ws) => {
         return;
       }
 
+      // Handle PATIENT_READY - patient joined the call page, tell doctor to resend offer
+      if (data.type === "PATIENT_READY") {
+        console.log(`Patient ready for call ${data.callId}`);
+        const target = users.get(data.to);
+        if (target && target.readyState === WebSocket.OPEN) {
+          target.send(JSON.stringify({
+            type: "PATIENT_READY",
+            from: data.from,
+            callId: data.callId
+          }));
+          console.log(`Notified doctor ${data.to} that patient is ready`);
+        }
+        
+        // Also check if we have a stored offer to send immediately
+        const call = activeCalls.get(data.callId);
+        if (call && call.offer) {
+          ws.send(JSON.stringify({
+            type: "RECONNECT_DATA",
+            callId: data.callId,
+            call: {
+              offer: call.offer,
+              answer: call.answer,
+              status: call.status,
+              callType: call.callType,
+              candidates: call.candidates.doctor
+            }
+          }));
+          console.log(`Sent stored offer to patient for call ${data.callId}`);
+        }
+        return;
+      }
+
       // Handle explicit END_CALL only
       if (data.type === "END_CALL") {
         const call = activeCalls.get(data.callId);
